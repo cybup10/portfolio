@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import db, { Certification } from "@/lib/db";
+import db, { ensureSchema, Certification } from "@/lib/db";
 import { verifySession } from "@/lib/auth";
 
 export async function GET() {
-  const certs = db
-    .prepare("SELECT * FROM certifications ORDER BY sort_order, id")
-    .all() as Certification[];
+  await ensureSchema();
+  const result = await db.execute(
+    "SELECT * FROM certifications ORDER BY sort_order, id"
+  );
+  const certs = result.rows as unknown as Certification[];
   return NextResponse.json(certs);
 }
 
 export async function POST(req: NextRequest) {
+  await ensureSchema();
   const authed = await verifySession();
   if (!authed) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -21,20 +24,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const stmt = db.prepare(
-    `INSERT INTO certifications (name, issuer, date_earned, verify_url, sort_order)
-     VALUES (?, ?, ?, ?, ?)`
-  );
-  const result = stmt.run(
-    body.name,
-    body.issuer,
-    body.date_earned ?? "",
-    body.verify_url ?? "",
-    body.sort_order ?? 0
-  );
+  const result = await db.execute({
+    sql: `INSERT INTO certifications (name, issuer, date_earned, verify_url, sort_order)
+          VALUES (?, ?, ?, ?, ?)`,
+    args: [
+      body.name,
+      body.issuer,
+      body.date_earned ?? "",
+      body.verify_url ?? "",
+      body.sort_order ?? 0,
+    ],
+  });
 
-  const created = db
-    .prepare("SELECT * FROM certifications WHERE id = ?")
-    .get(result.lastInsertRowid) as Certification;
+  const createdResult = await db.execute({
+    sql: "SELECT * FROM certifications WHERE id = ?",
+    args: [result.lastInsertRowid?.toString() ?? ""],
+  });
+  const created = createdResult.rows[0] as unknown as Certification;
+
   return NextResponse.json(created, { status: 201 });
 }
